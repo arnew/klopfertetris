@@ -1,0 +1,3 @@
+pygame>=2.0.0
+pyusb>=1.2.1
+# Add other third-party packages here if your local modules require them (e.g. python-dotenv, requests)

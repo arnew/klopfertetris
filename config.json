@@ -3,7 +3,7 @@
   "player_name": "Alice",
   "preferred_peer": "P2",
   "usb_frame_device": "/dev/ttyACM0",
-  "accept_garbage": "preferred",  // options: "off", "preferred", "all"
+  "accept_garbage": "preferred",  
   "broadcast_port": 50000,
   "broadcast_iface": "255.255.255.255",
   "default_level": 0

@@ -1,0 +1,12 @@
+{
+    // Prefer the venv interpreter (Windows). If you are on macOS/Linux replace with "venv/bin/python".
+    "python.defaultInterpreterPath": "${workspaceFolder}/venv/Scripts/python.exe",
+    // Legacy key (some older setups/extensions still read this)
+    "python.pythonPath": "${workspaceFolder}/venv/Scripts/python.exe",
+    // Ensure the integrated terminal activates the selected environment automatically
+    "python.terminal.activateEnvironment": true,
+    // Helpful: make sure workspace folder is on PYTHONPATH when debugging/running
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}"
+    ]
+}
