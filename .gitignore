@@ -8,3 +8,5 @@ ENV/
 dist/
 build/
 *.pyc
+.venv/
+stubArchive/

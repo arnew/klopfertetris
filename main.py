@@ -1,103 +1,147 @@
 # main.py
-import time
-import pygame
-from tetris_core import TetrisGame, PIECE_COLORS
+import argparse, time, pygame
+from rules.tetris_rules import RulesEngine as TetrisRules
+from rules.tritris_rules import TritrisRules
+from sim.tetris_sim import TetrisSim
 from renderer.usb_frame import try_open, send_frame
 
-WIDTH = 10
-HEIGHT = 20
-PIXEL_SIZE = 24   # onscreen pixel size for pygame window
+DEFAULT_MODE = "tritris"  # or "tritris"
 
-KEY_LEFT  = pygame.K_LEFT
-KEY_RIGHT = pygame.K_RIGHT
-KEY_DOWN  = pygame.K_DOWN
-KEY_ROT   = pygame.K_UP
-KEY_DROP  = pygame.K_SPACE
-KEY_QUIT  = pygame.K_ESCAPE
+COLORS_TET = {
+    "I": (0,255,255),"O":(255,255,0),"T":(160,0,160),
+    "S":(0,255,0),"Z":(255,0,0),"J":(0,0,255),"L":(255,128,0),"X":(120,120,120)
+}
 
-def build_composite(game: TetrisGame):
-    board = game.board
-    piece_buf = game.get_buffer()
-    ghost_buf = game.get_ghost_buffer()
-    preview_buf = game.get_preview_overlay()
+COLORS_TRI = {
+    "I": (20,20,255), "L": (255,20,16), "D": (20,255,20), "x": (12,12,12)
+}
 
-    frame = []
-    for y in range(HEIGHT):
+def build_frame_from_rules(rules_engine):
+    w = rules_engine.width
+    h = rules_engine.height
+    # start with placed board
+    buf = [[None for _ in range(w)] for __ in range(h)]
+    bd = rules_engine.get_board()
+    for y in range(h):
+        for x in range(w):
+            buf[y][x] = bd[y][x]
+    # overlay ghost
+    for (x,y,ch) in rules_engine.get_ghost_cells():
+        if 0 <= y < h and 0 <= x < w and buf[y][x] is None:
+            buf[y][x] = ch  # lower-case indicates ghost
+    # overlay current
+    for (x,y,ch) in rules_engine.get_current_cells():
+        if 0 <= y < h and 0 <= x < w:
+            buf[y][x] = ch
+    # overlay preview
+    for (x,y,ch) in rules_engine.get_preview_cells():
+        if 0 <= y < h and 0 <= x < w and buf[y][x] is None:
+            buf[y][x] = ch
+    return buf
+
+def frame_to_rgb(frame, mode):
+    h = len(frame); w = len(frame[0])
+    out = []
+    for y in range(h):
         row = []
-        for x in range(WIDTH):
-            cell = piece_buf[y][x] or board[y][x] or preview_buf[y][x] or ghost_buf[y][x]
-            if cell:
-                base = PIECE_COLORS[cell.upper()]
-                if cell.islower():
-                    base = (base[0]//4, base[1]//4, base[2]//4)
-                row.append(base)
-            else:
+        for x in range(w):
+            cell = frame[y][x]
+            if cell is None:
                 row.append((0,0,0))
-        frame.append(row)
-    return frame
-
-def draw_pygame(screen, frame):
-    for y in range(HEIGHT):
-        for x in range(WIDTH):
-            r,g,b = frame[y][x]
-            pygame.draw.rect(
-                screen,
-                (r,g,b),
-                (x*PIXEL_SIZE, y*PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE)
-            )
-    pygame.display.flip()
+            else:
+                ch = str(cell).upper()
+                # ghost/preview if lowercase
+                if str(cell).islower():
+                    # dim color
+                    col = (10,10,10)
+                else:
+                    if mode == "tetris":
+                        col = COLORS_TET.get(ch, (120,120,120))
+                    else:
+                        col = COLORS_TRI.get(ch, (120,120,120))
+                row.append(col)
+        out.append(row)
+    return out
 
 def main():
-    pygame.init()
-    screen = pygame.display.set_mode((WIDTH * PIXEL_SIZE, HEIGHT * PIXEL_SIZE))
-    pygame.display.set_caption("Klopferlight Tetris (Hybrid Output)")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["tetris","tritris"], default=DEFAULT_MODE)
+    args = parser.parse_args()
 
-    usb = try_open()
-    if usb:
-        print("USB output enabled on:", usb.port)
+    mode = args.mode
+    if mode == "tetris":
+        rules = TetrisRules(10,20)
+        colors = COLORS_TET
     else:
-        print("No USB Klopferlight detected → using pygame display only")
+        rules = TritrisRules(4,5)
+        colors = COLORS_TRI
 
-    game = TetrisGame(WIDTH, HEIGHT)
+    sim = TetrisSim(rules)
+    # try open USB device
+    usb = try_open()
+    print("USB device:", "found" if usb else "none")
+
+    # pygame setup (for mirror or fallback)
+    pygame.init()
+    PIX = 24 if mode=="tetris" else 48
+    screen = pygame.display.set_mode((rules.width*PIX + 160, rules.height*PIX))
+    pygame.display.set_caption(f"{mode} - hybrid renderer")
     clock = pygame.time.Clock()
-    fall_timer = 0.0
 
     running = True
     while running:
-        dt = clock.tick(60) / 1000.0
-        fall_timer += dt
-
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
+        dt = clock.tick(20) / 1000.0
+        # events
+        soft = False
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT:
                 running = False
-            if event.type == pygame.KEYDOWN:
-                if event.key == KEY_QUIT:
+            elif ev.type == pygame.KEYDOWN:
+                if ev.key == pygame.K_ESCAPE:
                     running = False
-                elif event.key == KEY_LEFT:
-                    game.move(-1, 0)
-                elif event.key == KEY_RIGHT:
-                    game.move(+1, 0)
-                elif event.key == KEY_ROT:
-                    game.rotate()
-                elif event.key == KEY_DROP:
-                    game.hard_drop()
+                elif ev.key == pygame.K_LEFT:
+                    sim.input.press_left()
+                elif ev.key == pygame.K_RIGHT:
+                    sim.input.press_right()
+                elif ev.key == pygame.K_UP:
+                    sim.rotate()
+                elif ev.key == pygame.K_SPACE:
+                    sim.hard_drop()
+                elif ev.key == pygame.K_DOWN:
+                    # call soft drop once now; autorepeat will be handled by sim update
+                    sim.soft_drop()
+            elif ev.type == pygame.KEYUP:
+                if ev.key == pygame.K_LEFT:
+                    sim.input.release_left()
+                elif ev.key == pygame.K_RIGHT:
+                    sim.input.release_right()
 
         keys = pygame.key.get_pressed()
-        if keys[KEY_DOWN]:
-            game.soft_drop()
-        else:
-            if fall_timer >= game.fall_speed:
-                game.fall()
-                fall_timer = 0.0
+        soft = keys[pygame.K_DOWN]
 
-        frame = build_composite(game)
+        # update sim
+        sim.update(dt, soft_hold=soft)
 
-        # Send to Klopferlight if attached
+        # render frame from rules engine
+        frame = build_frame_from_rules(rules)
+        rgb = frame_to_rgb(frame, mode)
+
+        # send to USB if available
         if usb:
-            send_frame(usb, frame, WIDTH, HEIGHT)
+            send_frame(usb, rgb, rules.width, rules.height)
 
-        # Always draw to pygame window
-        draw_pygame(screen, frame)
+        # pygame mirror
+        # draw
+        screen.fill((8,8,8))
+        for y in range(rules.height):
+            for x in range(rules.width):
+                r,g,b = rgb[y][x]
+                pygame.draw.rect(screen, (r,g,b), (x*PIX, y*PIX, PIX-1, PIX-1))
+        # draw preview box
+        font = pygame.font.SysFont(None, 20)
+        text = font.render(f"Mode: {mode}", True, (200,200,200))
+        screen.blit(text, (rules.width*PIX + 10, 10))
+        pygame.display.flip()
 
     pygame.quit()
 

@@ -7,6 +7,14 @@
     "python.terminal.activateEnvironment": true,
     // Helpful: make sure workspace folder is on PYTHONPATH when debugging/running
     "python.analysis.extraPaths": [
-        "${workspaceFolder}"
-    ]
+        "${workspaceFolder}",
+        "c:\\Users\\Arne Wichmann\\AppData\\Roaming\\Code\\User\\globalStorage\\padgettholdings.circuitpythonsync\\stubs\\circuitpython_stubs-10.0.3"
+    ],
+    "python.languageServer": "Pylance",
+    "python.analysis.diagnosticSeverityOverrides": {
+        "reportMissingModuleSource": "none",
+        "reportShadowedImports": "none"
+    },
+    "circuitpython.board.version": null,
+    "circuitpythonsync.cpfullversion": "10.0.3"
 }
