@@ -1,91 +1,105 @@
 # main.py
-import json, time, os, sys
-from tetris_core import Game
-from renderer.usb_frame import USBFrameRenderer
-from renderer.pygame_display import PygameRenderer
-from net.network import NetworkNode
-from input_handler import InputHandler
+import time
+import pygame
+from tetris_core import TetrisGame, PIECE_COLORS
+from renderer.usb_frame import try_open, send_frame
 
-CONFIG_PATH = "config.json"
+WIDTH = 10
+HEIGHT = 20
+PIXEL_SIZE = 24   # onscreen pixel size for pygame window
 
-def load_config():
-    with open(CONFIG_PATH, "r") as f:
-        cfg = json.load(f)
-    return cfg
+KEY_LEFT  = pygame.K_LEFT
+KEY_RIGHT = pygame.K_RIGHT
+KEY_DOWN  = pygame.K_DOWN
+KEY_ROT   = pygame.K_UP
+KEY_DROP  = pygame.K_SPACE
+KEY_QUIT  = pygame.K_ESCAPE
 
-def choose_renderer(cfg):
-    usb_dev = cfg.get("usb_frame_device")
-    if usb_dev:
-        r = USBFrameRenderer(usb_dev, width=10, height=20)
-        if r.available():
-            print("Using USB frame renderer")
-            return r
-    # fallback to CRAP UDP renderer omitted for brevity; use pygame
-    print("Falling back to pygame renderer")
-    return PygameRenderer(width=10, height=20, cell=20)
+def build_composite(game: TetrisGame):
+    board = game.board
+    piece_buf = game.get_buffer()
+    ghost_buf = game.get_ghost_buffer()
+    preview_buf = game.get_preview_overlay()
+
+    frame = []
+    for y in range(HEIGHT):
+        row = []
+        for x in range(WIDTH):
+            cell = piece_buf[y][x] or board[y][x] or preview_buf[y][x] or ghost_buf[y][x]
+            if cell:
+                base = PIECE_COLORS[cell.upper()]
+                if cell.islower():
+                    base = (base[0]//4, base[1]//4, base[2]//4)
+                row.append(base)
+            else:
+                row.append((0,0,0))
+        frame.append(row)
+    return frame
+
+def draw_pygame(screen, frame):
+    for y in range(HEIGHT):
+        for x in range(WIDTH):
+            r,g,b = frame[y][x]
+            pygame.draw.rect(
+                screen,
+                (r,g,b),
+                (x*PIXEL_SIZE, y*PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE)
+            )
+    pygame.display.flip()
 
 def main():
-    cfg = load_config()
-    player_id = cfg.get("player_id","P")
-    player_name = cfg.get("player_name","Player")
-    preferred_peer = cfg.get("preferred_peer")
-    accept_garbage = cfg.get("accept_garbage","preferred")
-    level = cfg.get("default_level",0)
+    pygame.init()
+    screen = pygame.display.set_mode((WIDTH * PIXEL_SIZE, HEIGHT * PIXEL_SIZE))
+    pygame.display.set_caption("Klopferlight Tetris (Hybrid Output)")
 
-    renderer = choose_renderer(cfg)
-    netnode = NetworkNode(player_id, player_name, port=cfg.get("broadcast_port",50000), bcast_addr=cfg.get("broadcast_iface","<broadcast>"))
-    netnode.start()
+    usb = try_open()
+    if usb:
+        print("USB output enabled on:", usb.port)
+    else:
+        print("No USB Klopferlight detected → using pygame display only")
 
-    game = Game(width=10, height=20, level=level)
-    inputh = InputHandler()
+    game = TetrisGame(WIDTH, HEIGHT)
+    clock = pygame.time.Clock()
+    fall_timer = 0.0
 
-    # on_garbage callback
-    def on_garbage(from_id, to_id, lines):
-        # apply if target is ALL or matches this player OR accept_garbage = all or preferred and from preferred
-        if accept_garbage == "off":
-            return
-        if to_id == "ALL" or to_id == player_id:
-            if accept_garbage == "all":
-                game.add_garbage(lines)
-            elif accept_garbage == "preferred" and from_id == preferred_peer:
-                game.add_garbage(lines)
-    netnode.on_garbage = on_garbage
+    running = True
+    while running:
+        dt = clock.tick(60) / 1000.0
+        fall_timer += dt
 
-    last = time.time()
-    print("Starting main loop. Controls: arrow keys, space hard drop, enter start.")
-    while True:
-        now = time.time()
-        dt = now - last
-        last = now
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            if event.type == pygame.KEYDOWN:
+                if event.key == KEY_QUIT:
+                    running = False
+                elif event.key == KEY_LEFT:
+                    game.move(-1, 0)
+                elif event.key == KEY_RIGHT:
+                    game.move(+1, 0)
+                elif event.key == KEY_ROT:
+                    game.rotate()
+                elif event.key == KEY_DROP:
+                    game.hard_drop()
 
-        # simple start screen/team selection on startup
-        # For brevity, start immediately; extend later to full menu
-        actions = inputh.poll()
-        if actions.get("quit"):
-            print("Quitting.")
-            break
-        if actions.get("rotate"):
-            game.rotate()
-        if actions.get("left"):
-            game.move(-1)
-        if actions.get("right"):
-            game.move(1)
-        if actions.get("soft"):
+        keys = pygame.key.get_pressed()
+        if keys[KEY_DOWN]:
             game.soft_drop()
-        if actions.get("hard"):
-            game.hard_drop()
+        else:
+            if fall_timer >= game.fall_speed:
+                game.fall()
+                fall_timer = 0.0
 
-        game.update(dt)
-        buf = game.get_buffer()
-        renderer.render(buf)
+        frame = build_composite(game)
 
-        # when lines cleared (we updated game.lines in lock), send garbage to preferred peer
-        # simplistic: if cleared >=2 -> send cleared-1 garbage lines to peer
-        # For a proper reaction, keep previous lines count
-        # (We implement a simple rule: every time lines increased, send lines-1 to preferred peer)
-        # For simplicity, not implemented here — extend as needed.
+        # Send to Klopferlight if attached
+        if usb:
+            send_frame(usb, frame, WIDTH, HEIGHT)
 
-        time.sleep(0.01)
+        # Always draw to pygame window
+        draw_pygame(screen, frame)
+
+    pygame.quit()
 
 if __name__ == "__main__":
     main()

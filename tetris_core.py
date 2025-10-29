@@ -1,235 +1,193 @@
 # tetris_core.py
-# Improved Tetris core: rotation with kick attempts, lock delay, ghost piece and next preview,
-# color mapping by piece type. Keeps API simple for renderer.
+import random
 
-import random, copy, time
+WIDTH = 10
+HEIGHT = 20
 
-# 4x4 tetromino bitmaps (same as before)
-TETROMINOS = {
-    'I': [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
-    'O': [[0,1,1,0],[0,1,1,0],[0,0,0,0],[0,0,0,0]],
-    'T': [[0,1,0,0],[1,1,1,0],[0,0,0,0],[0,0,0,0]],
-    'J': [[1,0,0,0],[1,1,1,0],[0,0,0,0],[0,0,0,0]],
-    'L': [[0,0,1,0],[1,1,1,0],[0,0,0,0],[0,0,0,0]],
-    'S': [[0,1,1,0],[1,1,0,0],[0,0,0,0],[0,0,0,0]],
-    'Z': [[1,1,0,0],[0,1,1,0],[0,0,0,0],[0,0,0,0]],
-}
-
-# Pleasant palette (R,G,B)
+# NES Tetris color-like palette (muted, can be improved later)
 PIECE_COLORS = {
-    'I': (0, 240, 240),
-    'O': (240, 240, 0),
-    'T': (160, 0, 240),
-    'J': (0, 0, 240),
-    'L': (240, 160, 0),
-    'S': (0, 240, 0),
-    'Z': (240, 0, 0),
-    'X': (120,120,120),  # used for garbage or preview fallback
+    "I": (0, 255, 255),
+    "O": (255, 255, 0),
+    "T": (128, 0, 128),
+    "S": (0, 255, 0),
+    "Z": (255, 0, 0),
+    "J": (0, 0, 255),
+    "L": (255, 128, 0),
 }
 
-def rotate_cw(shape):
-    # rotate 4x4 matrix clockwise
-    return [ [shape[3-c][r] for c in range(4)] for r in range(4) ]
+# Tetromino definitions: 4 rotation states each
+PIECES = {
+    "I": [
+        [(0,1),(1,1),(2,1),(3,1)],
+        [(2,0),(2,1),(2,2),(2,3)],
+        [(0,2),(1,2),(2,2),(3,2)],
+        [(1,0),(1,1),(1,2),(1,3)],
+    ],
+    "O": [
+        [(1,0),(2,0),(1,1),(2,1)],
+        [(1,0),(2,0),(1,1),(2,1)],
+        [(1,0),(2,0),(1,1),(2,1)],
+        [(1,0),(2,0),(1,1),(2,1)],
+    ],
+    "T": [
+        [(1,0),(0,1),(1,1),(2,1)],
+        [(1,0),(1,1),(2,1),(1,2)],
+        [(0,1),(1,1),(2,1),(1,2)],
+        [(1,0),(0,1),(1,1),(1,2)],
+    ],
+    "S": [
+        [(1,0),(2,0),(0,1),(1,1)],
+        [(1,0),(1,1),(2,1),(2,2)],
+        [(1,1),(2,1),(0,2),(1,2)],
+        [(0,0),(0,1),(1,1),(1,2)],
+    ],
+    "Z": [
+        [(0,0),(1,0),(1,1),(2,1)],
+        [(2,0),(1,1),(2,1),(1,2)],
+        [(0,1),(1,1),(1,2),(2,2)],
+        [(1,0),(0,1),(1,1),(0,2)],
+    ],
+    "J": [
+        [(0,0),(0,1),(1,1),(2,1)],
+        [(1,0),(2,0),(1,1),(1,2)],
+        [(0,1),(1,1),(2,1),(2,2)],
+        [(1,0),(1,1),(0,2),(1,2)],
+    ],
+    "L": [
+        [(2,0),(0,1),(1,1),(2,1)],
+        [(1,0),(1,1),(1,2),(2,2)],
+        [(0,1),(1,1),(2,1),(0,2)],
+        [(0,0),(1,0),(1,1),(1,2)],
+    ],
+}
 
-class Game:
-    def __init__(self, width=10, height=20, level=0, lock_delay=0.5):
-        self.width = width
-        self.height = height
-        self.level = level
-        self.lock_delay = lock_delay
-        self.reset()
 
-    def reset(self):
-        self.board = [[0]*self.width for _ in range(self.height)]
-        self.score = 0
-        self.lines = 0
-        self.bag = []
-        self.next_piece_type = None
-        self._fill_bag()
-        self._spawn_from_bag()
-        self.drop_timer = 0.0
-        self.drop_delay = self.level_to_delay(self.level)
-        self.lock_timer = 0.0
-        self.game_over = False
-        self.last_cleared = 0
+class TetrisGame:
+    def __init__(self, w=10, h=20):
+        self.w = w
+        self.h = h
+        self.board = [[None for _ in range(w)] for _ in range(h)]
+        self.fall_speed = 0.5  # seconds per grid step (level system later)
+        self._new_bag()
+        self._spawn_piece()
 
-    def level_to_delay(self, level):
-        base = 1.0
-        return max(0.03, base * (0.8 ** level))
+    # --- Piece / bag handling ------------------------------------------------
 
-    def _fill_bag(self):
+    def _new_bag(self):
+        self.bag = list(PIECES.keys())
+        random.shuffle(self.bag)
+
+    def _next_piece(self):
         if not self.bag:
-            self.bag = list(TETROMINOS.keys())
-            random.shuffle(self.bag)
-        if not self.next_piece_type:
-            self.next_piece_type = self.bag.pop()
+            self._new_bag()
+        return self.bag.pop()
 
-    def _spawn_from_bag(self):
-        # ensure next is available
-        if not self.bag:
-            self.bag = list(TETROMINOS.keys())
-            random.shuffle(self.bag)
-        # current piece becomes next recorded
-        if not self.next_piece_type:
-            self.next_piece_type = self.bag.pop()
-        self.piece_type = self.next_piece_type
-        self.next_piece_type = self.bag.pop() if self.bag else None
-        self.piece = copy.deepcopy(TETROMINOS[self.piece_type])
-        # spawn near top; NES spawns with slight offset - we use py=-1 so piece can enter
-        self.px = self.width//2 - 2
-        self.py = -1
-        self.lock_timer = 0.0
-        # check immediate collision -> game over
-        if self.collides():
+    def _spawn_piece(self):
+        self.current = self._next_piece()
+        self.rotation = 0
+        self.x = self.w//2 - 2
+        self.y = 0
+        if not self._fits(self.x, self.y, self.rotation):
             self.game_over = True
+        else:
+            self.game_over = False
 
-    def collides(self, px=None, py=None, piece=None):
-        px = self.px if px is None else px
-        py = self.py if py is None else py
-        piece = self.piece if piece is None else piece
-        for y in range(4):
-            for x in range(4):
-                if piece[y][x]:
-                    bx = px + x
-                    by = py + y
-                    if bx < 0 or bx >= self.width:
-                        return True
-                    if by >= self.height:
-                        return True
-                    if by >= 0 and self.board[by][bx]:
-                        return True
-        return False
+    # --- Movement & rotation --------------------------------------------------
 
-    # rotation with simple kick attempt list
+    def _fits(self, x, y, rot):
+        for (dx, dy) in PIECES[self.current][rot]:
+            xx = x + dx
+            yy = y + dy
+            if xx < 0 or xx >= self.w or yy < 0 or yy >= self.h:
+                return False
+            if self.board[yy][xx]:
+                return False
+        return True
+
+    def move(self, dx, dy):
+        nx = self.x + dx
+        ny = self.y + dy
+        if self._fits(nx, ny, self.rotation):
+            self.x, self.y = nx, ny
+
     def rotate(self):
-        newp = rotate_cw(self.piece)
-        # basic kick offsets to try (center-ish, L/R, up)
-        kicks = [(0,0), (-1,0), (1,0), (-2,0), (2,0), (0,-1), (0,1)]
-        for ox, oy in kicks:
-            if not self.collides(px=self.px+ox, py=self.py+oy, piece=newp):
-                self.piece = newp
-                self.px += ox
-                self.py += oy
-                # rotating resets lock timer (player can move/rotate within lock delay)
-                self.lock_timer = 0.0
-                return True
-        # rotation failed -> no change
-        return False
+        new_rot = (self.rotation + 1) % 4
+        if self._fits(self.x, self.y, new_rot):
+            self.rotation = new_rot
 
-    def move(self, dx):
-        if not self.collides(px=self.px+dx):
-            self.px += dx
-            self.lock_timer = 0.0
-            return True
-        return False
+    # --- Falling logic --------------------------------------------------------
+
+    def fall(self):
+        if self._fits(self.x, self.y + 1, self.rotation):
+            self.y += 1
+        else:
+            self._lock_piece()
+            self._clear_lines()
+            self._spawn_piece()
 
     def soft_drop(self):
-        if not self.collides(py=self.py+1):
-            self.py += 1
-            # soft drop does not reset lock timer per classic, but we reset for better feel
-            self.lock_timer = 0.0
-            return True
-        return False
+        """Move piece down by one cell if possible, else lock."""
+        if self._fits(self.x, self.y + 1, self.rotation):
+            self.y += 1
+        else:
+            self._lock_piece()
+            self._clear_lines()
+            self._spawn_piece()
 
     def hard_drop(self):
-        # drop until collision then lock
-        while not self.collides(py=self.py+1):
-            self.py += 1
-        self.lock_piece()
+        while self._fits(self.x, self.y + 1, self.rotation):
+            self.y += 1
+        self._lock_piece()
+        self._clear_lines()
+        self._spawn_piece()
 
-    def lock_piece(self):
-        for y in range(4):
-            for x in range(4):
-                if self.piece[y][x]:
-                    bx = self.px + x
-                    by = self.py + y
-                    if 0 <= by < self.height and 0 <= bx < self.width:
-                        self.board[by][bx] = self.piece_type  # store piece id for coloring
-        cleared = self.clear_lines()
-        self.last_cleared = cleared
-        self.score += self.score_for_clear(cleared)
-        self.lines += cleared
-        # spawn next
-        self._spawn_from_bag()
+    def _lock_piece(self):
+        for (dx, dy) in PIECES[self.current][self.rotation]:
+            xx = self.x + dx
+            yy = self.y + dy
+            if 0 <= yy < self.h:
+                self.board[yy][xx] = self.current
 
-    def clear_lines(self):
-        newb = [row for row in self.board if any(v==0 for v in row)]
-        cleared = self.height - len(newb)
-        while len(newb) < self.height:
-            newb.insert(0, [0]*self.width)
-        self.board = newb
-        return cleared
+    def _clear_lines(self):
+        new = [row for row in self.board if any(c is None for c in row)]
+        cleared = self.h - len(new)
+        for _ in range(cleared):
+            new.insert(0, [None]*self.w)
+        self.board = new
 
-    def score_for_clear(self, n):
-        if n==0: return 0
-        elif n==1: return 40*(self.level+1)
-        elif n==2: return 100*(self.level+1)
-        elif n==3: return 300*(self.level+1)
-        else: return 1200*(self.level+1)
-
-    def update(self, dt, soft_down=False):
-        if self.game_over:
-            return
-        # gravity timing
-        # if soft_down True, accelerate by factor
-        self.drop_timer += dt
-        delay = self.level_to_delay(self.level) if not soft_down else max(0.02, self.level_to_delay(self.level) * 0.1)
-        if self.drop_timer >= delay:
-            self.drop_timer = 0.0
-            if not self.collides(py=self.py+1):
-                self.py += 1
-                self.lock_timer = 0.0
-            else:
-                # piece is resting on something; start/advance lock timer
-                self.lock_timer += dt
-                if self.lock_timer >= self.lock_delay:
-                    self.lock_piece()
-                    self.lock_timer = 0.0
+    # --- Buffers for external renderers --------------------------------------
 
     def get_buffer(self):
-        """
-        Returns a 2D array height x width with:
-          0: empty
-          'I','O','T',... : filled by placed pieces or current piece
-          lowercase for ghost overlay? (we keep types)
-        Note: current falling piece is shown with its piece_type.
-        """
-        buf = [row[:] for row in self.board]
-        # place current piece (if within visible rows)
-        for y in range(4):
-            for x in range(4):
-                if self.piece[y][x]:
-                    bx = self.px + x
-                    by = self.py + y
-                    if 0 <= bx < self.width and 0 <= by < self.height:
-                        buf[by][bx] = self.piece_type
+        buf = [[None for _ in range(self.w)] for _ in range(self.h)]
+        for (dx, dy) in PIECES[self.current][self.rotation]:
+            xx = self.x + dx
+            yy = int(self.y) + dy
+            if 0 <= xx < self.w and 0 <= yy < self.h:
+                buf[yy][xx] = self.current
         return buf
-
-    def get_ghost_y(self):
-        """Return the y coordinate for the ghost piece (where it would land)."""
-        test_y = self.py
-        while not self.collides(py=test_y+1):
-            test_y += 1
-        return test_y
 
     def get_ghost_buffer(self):
-        """Return a buffer same size, marking ghost positions with piece type but distinguishable by renderer."""
-        buf = [[0]*self.width for _ in range(self.height)]
-        gy = self.get_ghost_y()
-        for y in range(4):
-            for x in range(4):
-                if self.piece[y][x]:
-                    bx = self.px + x
-                    by = gy + y
-                    if 0 <= bx < self.width and 0 <= by < self.height:
-                        buf[by][bx] = self.piece_type
+        gy = self.y
+        while self._fits(self.x, gy+1, self.rotation):
+            gy += 1
+        buf = [[None for _ in range(self.w)] for _ in range(self.h)]
+        for (dx, dy) in PIECES[self.current][self.rotation]:
+            xx = self.x + dx
+            yy = int(gy) + dy
+            if 0 <= xx < self.w and 0 <= yy < self.h:
+                buf[yy][xx] = self.current.lower()  # darker shade
         return buf
 
-    def add_garbage(self, n):
-        for _ in range(n):
-            hole = random.randrange(0, self.width)
-            row = [1]*self.width
-            row[hole] = 0
-            self.board.pop(0)
-            # convert 1→'X' so renderer colors garbage differently (or mapped)
-            self.board.append(['X' if v else 0 for v in row])
+    def get_preview_overlay(self):
+        # Show next piece faint at top row center
+        nxt = self.bag[-1] if self.bag else self.current
+        shape = PIECES[nxt][0]
+        px = self.w//2 - 2
+        py = 1
+        buf = [[None for _ in range(self.w)] for _ in range(self.h)]
+        for (dx, dy) in shape:
+            xx = px + dx
+            yy = py + dy
+            if 0 <= xx < self.w and 0 <= yy < self.h:
+                buf[yy][xx] = nxt.lower()
+        return buf
