@@ -5,7 +5,7 @@ from rules.tritris_rules import TritrisRules
 from sim.tetris_sim import TetrisSim
 from renderer.usb_frame import try_open, send_frame
 
-DEFAULT_MODE = "tritris"  # or "tritris"
+DEFAULT_MODE = "tetris"  # or "tritris"
 
 COLORS_TET = {
     "I": (0,255,255),"O":(255,255,0),"T":(160,0,160),
@@ -90,7 +90,7 @@ def main():
 
     running = True
     while running:
-        dt = clock.tick(20) / 1000.0
+        dt = clock.tick(60) / 1000.0
         # events
         soft = False
         for ev in pygame.event.get():

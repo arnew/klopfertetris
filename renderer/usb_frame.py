@@ -23,7 +23,7 @@ def list_serial_ports():
         print("serial.tools.list_ports not available (pyserial missing).", file=sys.stderr)
     return ports
 
-def try_open(preferred="COM6", baudrate=115200, timeout=1):
+def try_open(preferred="COM10", baudrate=115200, timeout=1):
     """
     Try to open the preferred port (COM6 by default). If not found, try
     reasonable fallbacks. Returns an open serial.Serial instance or None.
