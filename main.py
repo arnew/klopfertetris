@@ -83,12 +83,24 @@ def main():
 
     # pygame setup (for mirror or fallback)
     pygame.init()
+    # Initialize joysticks/gamepads
+    pygame.joystick.init()
+    joysticks = [pygame.joystick.Joystick(i) for i in range(pygame.joystick.get_count())]
+    for js in joysticks:
+        js.init()
+        print(f"Gamepad detected: {js.get_name()}")
+
     PIX = 24 if mode=="tetris" else 48
     screen = pygame.display.set_mode((rules.width*PIX + 160, rules.height*PIX))
     pygame.display.set_caption(f"{mode} - hybrid renderer")
     clock = pygame.time.Clock()
 
     running = True
+    # Track held directions for hats
+    hat_left = False
+    hat_right = False
+    hat_down = False
+
     while running:
         dt = clock.tick(60) / 1000.0
         # events
@@ -115,9 +127,49 @@ def main():
                     sim.input.release_left()
                 elif ev.key == pygame.K_RIGHT:
                     sim.input.release_right()
+            elif ev.type == pygame.JOYBUTTONDOWN:
+                # Map some buttons generically (may need adjustment for your controller)
+                if ev.button == 0:  # e.g. A
+                    sim.rotate()
+                elif ev.button == 1:  # e.g. B
+                    sim.hard_drop()
+                elif ev.button == 2:  # e.g. X
+                    sim.soft_drop()
+                elif ev.button == 3:  # e.g. Y
+                    sim.rotate()
+            elif ev.type == pygame.JOYBUTTONUP:
+                # No action needed for button up in this mapping
+                pass
+            elif ev.type == pygame.JOYHATMOTION:
+                # D-pad/hat input
+                hat_x, hat_y = ev.value
+                # Left/right
+                if hat_x < 0:
+                    sim.input.press_left()
+                    hat_left = True
+                elif hat_x > 0:
+                    sim.input.press_right()
+                    hat_right = True
+                else:
+                    if hat_left:
+                        sim.input.release_left()
+                        hat_left = False
+                    if hat_right:
+                        sim.input.release_right()
+                        hat_right = False
+                # Down/soft drop
+                if hat_y < 0:
+                    sim.soft_drop()
+                    hat_down = True
+                else:
+                    if hat_down:
+                        hat_down = False
+                # Up/rotate
+                if hat_y > 0:
+                    sim.rotate()
 
         keys = pygame.key.get_pressed()
-        soft = keys[pygame.K_DOWN]
+        soft = keys[pygame.K_DOWN] or hat_down
 
         # update sim
         sim.update(dt, soft_hold=soft)
