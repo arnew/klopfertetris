@@ -15,14 +15,13 @@ class PygameRenderer:
         return True
 
     def render(self, buffer2d):
+        # buffer2d: 2D array of (r,g,b) tuples, shape [height][width]
         self.screen.fill((0,0,0))
         for y in range(self.height):
             for x in range(self.width):
-                v = buffer2d[y][x]
-                if isinstance(v, tuple):
-                    color = v
-                else:
-                    color = (255,128,0) if v else (0,0,0)
-                if v:
-                    pygame.draw.rect(self.screen, color, (x*self.cell, y*self.cell, self.cell-1, self.cell-1))
+                color = buffer2d[y][x] if buffer2d[y][x] else (0,0,0)
+                pygame.draw.rect(
+                    self.screen, color,
+                    (x*self.cell, y*self.cell, self.cell-1, self.cell-1)
+                )
         pygame.display.flip()

@@ -40,6 +40,7 @@ class TritrisRules:
         self.x = 0
         self.y = 0
         self.next_piece = None
+        self.game_over_on_spawn = False
         self._refill_bag()
         self.spawn_piece()
 
@@ -63,6 +64,9 @@ class TritrisRules:
         # spawn near top center (triomino shapes assumed in 3x3 box)
         self.x = (self.width // 2) - 1
         self.y = 0
+        # Game over detection: if the new piece doesn't fit at spawn
+        if not self.fits(self.x, self.y, self.rotation):
+            self.game_over_on_spawn = True
 
     def fits(self, x, y, rot):
         shape = TRIOMINOES[self.current][rot]
@@ -135,3 +139,6 @@ class TritrisRules:
         for (dx, dy) in shape:
             out.append((px + dx, py + dy, piece.lower()))
         return out
+
+    def is_game_over(self):
+        return self.game_over_on_spawn

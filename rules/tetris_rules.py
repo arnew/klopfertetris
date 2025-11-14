@@ -60,6 +60,7 @@ class RulesEngine:
         self.x = 0
         self.y = 0
         self.next_piece = None
+        self.game_over_on_spawn = False
         self._refill_bag()
         self.spawn_piece()
 
@@ -82,6 +83,9 @@ class RulesEngine:
         self.rotation = 0
         self.x = (self.width // 2) - 2
         self.y = -1  # spawn slightly above visible area
+        # Game over detection: if the new piece doesn't fit at spawn
+        if not self.fits(self.x, self.y, self.rotation):
+            self.game_over_on_spawn = True
 
     def fits(self, x, y, rot):
         # check piece placed at (x,y) with rotation rot (0..3)
@@ -128,6 +132,9 @@ class RulesEngine:
             newb.insert(0, [None for _ in range(self.width)])
         self.board = newb
         return cleared
+
+    def is_game_over(self):
+        return self.game_over_on_spawn
 
     # accessors for rendering convenience
     def get_board(self):

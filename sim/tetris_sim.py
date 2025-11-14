@@ -35,6 +35,23 @@ class TetrisSim:
         self.lock_timer = 0.0
         self.input = InputState()
         self.last_lines = 0
+        self._fall_acc = 0.0
+        self.game_over = False
+
+    def reset(self):
+        # Reset the rules engine and all state
+        self.rules.__init__(self.rules.width, self.rules.height)
+        self.level = 0
+        self.fall_speed = self.level_to_delay(self.level)
+        self.lock_timer = 0.0
+        self.input = InputState()
+        self.last_lines = 0
+        self._fall_acc = 0.0
+        self.game_over = False
+
+    @property
+    def is_game_over(self):
+        return self.game_over
 
     def level_to_delay(self, level):
         base = 1.0
@@ -66,6 +83,8 @@ class TetrisSim:
         return False
 
     def hard_drop(self):
+        if self.game_over:
+            return
         while self.rules.fits(self.rules.x, self.rules.y + 1, self.rules.rotation):
             self.rules.y += 1
         # lock immediately
@@ -73,6 +92,9 @@ class TetrisSim:
         cleared = self.rules.clear_lines()
         self.lock_timer = 0.0
         self.last_lines = cleared
+        # Check for game over after locking
+        if not self.rules.fits(self.rules.x, self.rules.y, self.rules.rotation):
+            self.game_over = True
 
     def update_input_autorepeat(self):
         # left
@@ -102,6 +124,8 @@ class TetrisSim:
         dt: seconds since last update
         soft_hold: boolean, whether soft drop key is held (accelerates gravity)
         """
+        if self.game_over:
+            return
         # handle input autorepeat
         self.update_input_autorepeat()
 
@@ -123,3 +147,6 @@ class TetrisSim:
                     cleared = self.rules.clear_lines()
                     self.last_lines = cleared
                     self.lock_timer = 0.0
+                    # Check for game over after locking
+                    if not self.rules.fits(self.rules.x, self.rules.y, self.rules.rotation):
+                        self.game_over = True
