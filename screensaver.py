@@ -53,17 +53,69 @@ def pastel_fade_color(t):
 
 def ss_ai_step(sim, dt):
     import random
-    if random.random() < 0.1:
+
+    # Reset AI state if game over
+    if sim.is_game_over:
+        sim.reset()
+        return
+
+    # Only act every N frames for more human-like speed
+    if not hasattr(ss_ai_step, "frame_counter"):
+        ss_ai_step.frame_counter = 0
+        ss_ai_step.action_delay = 6
+        ss_ai_step.move_dir = 0
+        ss_ai_step.move_timer = 0
+        ss_ai_step.target_x = None
+
+    ss_ai_step.frame_counter += 1
+
+    # If no target or piece locked, pick a new target x for the current piece
+    if ss_ai_step.target_x is None or not sim.rules.fits(sim.rules.x, sim.rules.y, sim.rules.rotation):
+        # Find all possible x positions for the current piece
+        piece = sim.rules.current
+        width = sim.rules.width
+        best_x = sim.rules.x
+        best_score = None
+        # Try all x positions and rotations, pick the lowest landing
+        for rot in range(4):
+            for x in range(-2, width+2):
+                y = sim.rules.y
+                # Simulate drop
+                while sim.rules.fits(x, y+1, rot):
+                    y += 1
+                if not sim.rules.fits(x, y, rot):
+                    continue
+                # Simple heuristic: prefer lowest y (deepest drop)
+                score = y
+                if best_score is None or score > best_score:
+                    best_score = score
+                    best_x = x
+                    best_rot = rot
+        ss_ai_step.target_x = best_x
+        ss_ai_step.target_rot = best_rot
+
+    # Move toward target rotation
+    if sim.rules.rotation != ss_ai_step.target_rot:
         sim.rotate()
-    if random.random() < 0.5:
+        return
+
+    # Move toward target x
+    if sim.rules.x < ss_ai_step.target_x:
+        sim.input.press_right()
+        sim.input.release_left()
+    elif sim.rules.x > ss_ai_step.target_x:
         sim.input.press_left()
+        sim.input.release_right()
     else:
         sim.input.release_left()
-    if random.random() < 0.5:
-        sim.input.press_right()
-    else:
         sim.input.release_right()
-    sim.update(dt, soft_hold=True)
+        # If at target, soft drop or hard drop with some probability
+        if random.random() < 0.2:
+            sim.hard_drop()
+            ss_ai_step.target_x = None  # force new target next frame
+
+    # Always soft drop for a bit more speed
+    sim.update(dt, soft_hold=(random.random() < 0.2))
 
 def run_screensaver(screen, usb, SS_W, SS_H, last_input_time):
     # Static state for screensaver
