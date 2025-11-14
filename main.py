@@ -163,14 +163,22 @@ def main():
             ss_vel[0] = random.choice([-2, 2])
             ss_vel[1] = random.choice([-2, 2])
 
+        # --- Screensaver mode ---
         if screensaver_active:
             # Screensaver mode: run AI Tetris in a moving subscreen
+            exit_screensaver = False
             for ev in pygame.event.get():
                 if ev.type == pygame.QUIT:
                     running = False
                 elif ev.type in (pygame.KEYDOWN, pygame.JOYBUTTONDOWN, pygame.JOYHATMOTION):
-                    screensaver_active = False
-                    last_input_time = time.time()
+                    exit_screensaver = True
+            if exit_screensaver:
+                screensaver_active = False
+                game_active = True  # allow game to start after screensaver
+                last_input_time = time.time()
+                # Clear event queue to avoid double-processing input
+                pygame.event.clear()
+                continue
             # Move subscreen
             ss_pos[0] += ss_vel[0]
             ss_pos[1] += ss_vel[1]
